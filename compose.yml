@@ -1,0 +1,24 @@
+services:
+  redditarchiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.redditarchiver
+      args:
+        NAME: RedditArchiver
+        APP_URL: http://localhost
+        REDDIT_CLIENT_ID: $REDDIT_CLIENT_ID
+        REDDIT_CLIENT_SECRET: $REDDIT_CLIENT_SECRET
+    ports:
+      - "80:80"
+    volumes:
+      - output:/app/output
+  revproxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    ports:
+      - "81:80"
+    depends_on:
+      - redditarchiver
+volumes:
+  output:

@@ -4,6 +4,8 @@ app:
   only-allow-from:
     - '198.51.100.0/24'
     - '2001:db8::/32'
+    - '127.0.0.1/32'       # IPv4 localhost
+    - '::1/128'            # IPv6 localhost
   disable-recursion-limit: false
 reddit:
   client-id: redacted
