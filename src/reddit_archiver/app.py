@@ -18,7 +18,12 @@ def before_request_callback():
     Initialises cookie and Reddit token
     """
     # Preventing unauthorized people to access the app
-    client_ip = flask.request.headers.getlist("X-Forwarded-For")[0]
+    x_forwarded_for = flask.request.headers.getlist("X-Forwarded-For")
+    if x_forwarded_for:
+        client_ip = x_forwarded_for[0]
+    else:
+        client_ip = flask.request.remote_addr
+
     is_allowed = auth.is_client_allowed(client_ip)
     if not is_allowed:
         log.warning(f"Access denied from {client_ip}")

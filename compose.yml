@@ -5,20 +5,40 @@ services:
       dockerfile: Dockerfile.redditarchiver
       args:
         NAME: RedditArchiver
-        APP_URL: http://localhost
+        APP_URL: http://localhost:5000
         REDDIT_CLIENT_ID: $REDDIT_CLIENT_ID
         REDDIT_CLIENT_SECRET: $REDDIT_CLIENT_SECRET
     ports:
-      - "80:80"
+      - "5000:5000"
     volumes:
-      - output:/app/output
-  revproxy:
-    build:
-      context: .
-      dockerfile: Dockerfile.nginx
+      - redditarchiver:/srv/redditarchiver
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      app-network:
+        ipv4_address: 172.24.0.21
+
+  apache:
+    image: httpd:2.4
+    volumes:
+      - redditarchiver:/srv/redditarchiver
     ports:
-      - "81:80"
-    depends_on:
-      - redditarchiver
+      - "80:80"
+    networks:
+      app-network:
+         ipv4_address: 172.24.0.22 # assign static IP for your container from the network defined below.
+
+
 volumes:
-  output:
+  redditarchiver:
+
+networks:
+  app-network:
+    external: true
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.24.0.0/24 # with explicit CIDR range

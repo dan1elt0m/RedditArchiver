@@ -2,14 +2,9 @@
 FROM ubuntu:noble AS build
 
 ARG PY_VERSION=3.12
-# The following does not work in Podman unless you build in Docker
-# compatibility mode: <https://github.com/containers/podman/issues/8477>
-# You can manually prepend every RUN script with `set -ex` too.
 SHELL ["sh", "-exc"]
 
 ### Start Build Prep.
-### This should be a separate build container for better reuse.
-
 RUN <<EOT
 apt-get update -qy
 apt-get install -qyy \
@@ -21,33 +16,17 @@ apt-get install -qyy \
     python${PY_VERSION}-dev
 EOT
 
-# security-conscious folks should package/review uv themselves.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# - Silence uv complaining about not being able to use hard links,
-# - tell uv to byte-compile packages for faster application startups,
-# - prevent uv from accidentally downloading isolated Python builds,
-# - pick a Python,
-# - and finally declare `/app` as the target for `uv sync`.
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PYTHON=python${PY_VERSION} \
     UV_PROJECT_ENVIRONMENT=/app
 
-### End Build Prep -- this is where your Dockerfile should start.
-
-# Since there's no point in shipping lock files, we move them
-# into a directory that is NOT copied into the runtime image.
-# The trailing slash makes COPY create `/_lock/` automagically.
 COPY pyproject.toml /_lock/
 COPY uv.lock /_lock/
 
-# Synchronize DEPENDENCIES without the application itself.
-# This layer is cached until uv.lock or pyproject.toml change.
-# You can create `/app` using `uv venv` in a separate `RUN`
-# step to have it cached, but with uv it's so fast, it's not worth
-# it and we let `uv sync` create it for us automagically.
 RUN --mount=type=cache,target=/root/.cache <<EOT
 cd /_lock
 uv sync \
@@ -56,11 +35,6 @@ uv sync \
     --no-install-project
 EOT
 
-# Now install the APPLICATION from `/src` without any dependencies.
-# `/src` will NOT be copied into the runtime container.
-# LEAVE THIS OUT if your application is NOT a proper Python package.
-# We can’t use `uv sync` here because that only does editable installs:
-# <https://github.com/astral-sh/uv/issues/5792>
 COPY . /src
 RUN --mount=type=cache,target=/root/.cache \
     uv pip install \
@@ -68,74 +42,89 @@ RUN --mount=type=cache,target=/root/.cache \
         --no-deps \
         /src
 
-
 ##########################################################################
 
 FROM ubuntu:noble
 SHELL ["sh", "-exc"]
 ARG PY_VERSION=3.12
-ARG APP_URL=http://localhost:8080
+ARG APP_URL=http://localhost:5000
 ARG REDDIT_CLIENT_ID
 ARG REDDIT_CLIENT_SECRET
 ARG ONLY_ALLOW_FROM
 
-# Optional: add the application virtualenv to search path.
 ENV PATH=/app/bin:$PATH
 
-COPY docker-entrypoint.sh /
-RUN chmod +x /docker-entrypoint.sh
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# Don't run your app as root.
+# Create app user
 RUN <<EOT
 groupadd -r app
 useradd -r -d /app -g app -N app
 EOT
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
-# See <https://hynek.me/articles/docker-signals/>.
-STOPSIGNAL SIGINT
-
-# Note how the runtime dependencies differ from build-time ones.
-# Notably, there is no uv either!
+# Install dependencies
 RUN <<EOT
 apt-get update -qy
 apt-get install -qyy \
     -o APT::Install-Recommends=false \
     -o APT::Install-Suggests=false \
     python${PY_VERSION} \
-    libpython${PY_VERSION}\
+    libpython${PY_VERSION} \
     libpcre3 \
-    libxml2
+    libxml2 \
+    curl \
+    apache2
 
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 EOT
 
-
-# Copy the pre-built `/app` directory to the runtime container
-# and change the ownership to user app and group app in one step.
 COPY --from=build --chown=app:app /app /app
+
+# Setup apache
 COPY redditarchiver.service /etc/systemd/system/redditarchiver.service
+COPY redditarchiver.conf /etc/apache2/sites-available/redditarchiver.conf
 
-USER app
+RUN a2enmod proxy proxy_http && \
+    a2ensite redditarchiver && \
+    a2dissite 000-default
+
+# Setup redditarchiver
 WORKDIR /app
+COPY src/reddit_archiver /app/
 
+RUN mkdir -p /var/run/apache2
+RUN mkdir -p /srv/redditarchiver
+RUN chown -R app:app /srv/redditarchiver
+RUN chmod 775 /srv/redditarchiver
 
-## Adjust config.yml
 COPY config.yml.example config.yml
+
+RUN chown -R app:app /app/
+RUN chown -R app:www-data /var/run
+RUN chmod -R 2775 /var/run
+
+RUN chown -R www-data:app /run
+RUN chmod -R 2775 /run
+
+RUN chmod +x /app/docker-entrypoint.sh
+
 RUN <<EOT
 sed -i "s|url:.*|url: \"${APP_URL}\"|g" /app/config.yml
 sed -i "s|client-id:.*|client-id: ${REDDIT_CLIENT_ID}|g" /app/config.yml
 sed -i "s|client-secret:.*|client-secret: ${REDDIT_CLIENT_SECRET}|g" /app/config.yml
-if [ -n "$ONLY_ALLOW_FROM" ]; then
-  sed -i "/only-allow-from:/,/disable-recursion-limit:/c\  only-allow-from:\n    - ${ONLY_ALLOW_FROM//,/\\n    - }\n  disable-recursion-limit: false" /app/config.yml
-fi
 EOT
 
-
-# run a smoke test that the application can, in fact, be imported.
+# Smoke test. If importing reddit_archiver fails, the build should fail.
 RUN <<EOT
 python -V
 python -Im site
 python -Ic 'import reddit_archiver'
 EOT
+
+USER app
+
+EXPOSE 5000
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+STOPSIGNAL SIGINT

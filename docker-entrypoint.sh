@@ -1,3 +1,8 @@
 #!/bin/bash
-source env/bin/activate
-env/bin/gunicorn --bind unix:run/gunicorn.sock --workers 1 wsgi:app
+set -e
+
+gunicorn -w 4 -b unix:/srv/redditarchiver/gunicorn.sock app:app
+# Start the flask webserver
+source /app/bin/activate
+python3 /app/wsgi.py
+
