@@ -1,7 +1,7 @@
 [project]
 name = "redditarchiver"
 version = "0.1.0"
-description = "Add your description here"
+description = "A simple web app to archive Reddit posts and comments."
 readme = "README.md"
 requires-python = ">=3.7"
 dependencies = [

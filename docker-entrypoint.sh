@@ -1,7 +1,3 @@
 #!/bin/bash
-set -e
-
-# Start the flask webserver
 source /app/bin/activate
-python3 /app/wsgi.py
-
+/app/bin/gunicorn --bind 0.0.0.0:5000 --workers 1 wsgi:app

@@ -15,8 +15,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    volumes:
-        - front-end:/app/data/static
   revproxy:
     build:
       context: .
@@ -25,8 +23,3 @@ services:
       - "80:80"
     depends_on:
       - redditarchiver
-    volumes:
-        - front-end:/app/data/static
-
-volumes:
-    front-end:
