@@ -7,6 +7,10 @@ SHELL ["sh", "-exc"]
 ### Start Build Prep.
 RUN <<EOT
 apt-get update -qy
+apt-get install -qy --no-install-recommends \
+    gnupg2 \
+    ca-certificates \
+apt-get update -qy \
 apt-get install -qyy \
     -o APT::Install-Recommends=false \
     -o APT::Install-Suggests=false \
@@ -71,9 +75,7 @@ apt-get install -qyy \
     python${PY_VERSION} \
     libpython${PY_VERSION} \
     libpcre3 \
-    libxml2 \
-    curl \
-    apache2
+    libxml2
 
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
